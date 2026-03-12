@@ -1,0 +1,10 @@
+services:
+  db:
+    image: timescale/timescaledb:2.25.2-pg18
+    container_name: tsdb
+    environment:
+      - POSTGRES_PASSWORD=netflow-local-dev
+      - POSTGRES_USER=netflow
+      - POSTGRES_DB=netflow
+    ports:
+      - "5432:5432"

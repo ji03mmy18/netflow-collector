@@ -1,0 +1,22 @@
+[package]
+name = "netflow-collector"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "netflow-collector"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+netflow_parser = "0.9"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+arc-swap = "1"
+socket2 = "0.5"
+anyhow = "1"
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
+chrono = "0.4"
