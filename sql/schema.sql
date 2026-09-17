@@ -16,9 +16,33 @@
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- ------------------------------------------------------------
+-- 用戶端時區
+--
+-- 這純粹是「顯示」設定：timestamptz 存的是絕對時刻，改時區不會動到任何
+-- 已存資料，也不影響 time_bucket 的分桶邊界或 timestamptz 之間的比較。
+-- flow_stat_1d.day 則是 collector 在 Rust 端算好的台北日期，同樣不受影響。
+--
+-- 之所以還是設進來：預設的 UTC 會讓 `WHERE day = CURRENT_DATE` 這種寫法
+-- 在台灣時間凌晨到早上八點之間查到錯的日期，而且不會報錯。與其要求每個
+-- 查詢都寫 `(now() AT TIME ZONE 'Asia/Taipei')::date`，不如讓資料庫本身
+-- 就對齊 collector 使用的時區。
+--
+-- 用 current_database() 而非寫死名稱，資料庫叫什麼由設定檔決定。
+-- 權限不足時只發 NOTICE：app 帳號不是資料庫擁有者的環境下，不該讓一個
+-- 顯示設定擋住整個 schema 部署。
+-- ------------------------------------------------------------
+DO $tz$
+BEGIN
+  EXECUTE format('ALTER DATABASE %I SET timezone TO %L', current_database(), 'Asia/Taipei');
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'could not set the database timezone (not the owner); '
+               'queries must spell out AT TIME ZONE ''Asia/Taipei'' themselves';
+END $tz$;
+
+-- ------------------------------------------------------------
 -- 紀錄表（不是設定表）。
 --
--- ⚠ 內網網段設定在 filter.toml 的 [netflow].intra_cidr，不在這裡。
+-- ⚠ 內網網段設定在 config.toml 的 [netflow].intra_cidr，不在這裡。
 --    這張表只保存「collector 上次實際使用的值」，用來在設定被改動時
 --    發出警告——因為統計表本身沒有任何欄位記錄它是用哪個網段算出來的，
 --    改了設定會讓 intra_*/ext_* 的語意從那一刻起悄悄改變。
@@ -30,9 +54,9 @@ CREATE TABLE IF NOT EXISTS app_config (
 );
 
 COMMENT ON TABLE app_config IS
-  'collector 寫入的執行紀錄，非設定來源；設定一律在 filter.toml';
+  'collector 寫入的執行紀錄，非設定來源；設定一律在 config.toml';
 
--- 監控清單不在資料庫裡：它是設定，放在 filter.toml 的 [monitored]。
+-- 監控清單不在資料庫裡：它是設定，放在 config.toml 的 [monitored]。
 -- 統計表直接存 inet，沒有代理鍵、沒有維度表、沒有外鍵（理由見 CLAUDE.md）。
 
 -- ============================================================
