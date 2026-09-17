@@ -1,0 +1,146 @@
+name: Build Linux binaries
+
+# 手動觸發。這不是 CI——push 不會跑，只有在你要產出可部署的執行檔時才按。
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "要編譯的 branch / tag / commit"
+        required: false
+        default: ""
+      tag:
+        description: "Release 標籤（例如 v0.1.0）。留空則只產生 artifact，不建立 Release。"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+
+    # 在 Debian 12 容器內編譯。
+    #
+    # 執行檔會連結建置環境的 glibc，而 glibc 只保證向前相容——用舊的編、
+    # 在新系統上可以跑，反過來不行。Debian 12 是 glibc 2.36，Debian 13 是
+    # 2.41，所以這裡編出來的東西兩個版本都能跑。
+    #
+    # 用容器的另一個好處：runner 是哪個 Ubuntu 版本完全不影響產出，
+    # 之後 GitHub 汰換 runner 映像也不會改變執行檔的相容性。
+    #
+    # 官方 rust 映像是多架構的，arm64 runner 會自動拉到 arm64 版本。
+    container: rust:1-bookworm
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 兩個架構都用原生 runner，不做交叉編譯：省掉工具鏈設定，
+          # 而且測試能真的在目標架構上執行。
+          # ARM runner 對 public repo 是免費的。
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      # 這是先前建議過、但在 macOS 本機做不到的事：在目標架構上實際跑測試。
+      # 程式裡沒有 unsafe、沒有 SIMD，位元組序也由 netflow_parser 明確處理，
+      # 理論上不會有架構差異——但跑一次只要幾秒。
+      #
+      # --locked 確保用 Cargo.lock 鎖定的版本，同一個 commit 永遠編出同樣的東西。
+      - name: Test
+        run: cargo test --release --locked
+
+      - name: Build
+        run: cargo build --release --locked
+
+      # 把執行檔需要的最低 glibc 印在執行摘要，方便和目標機器的
+      # `ldd --version` 對照，不用等部署到一半才發現。
+      #
+      # continue-on-error：這一步純粹是報告，執行檔此時已經編好。若容器內
+      # 缺少 objdump（binutils），不該因此賠掉整個 artifact。
+      - name: Report build environment
+        continue-on-error: true
+        run: |
+          BIN=target/release/netflow-collector
+          if command -v objdump >/dev/null; then
+            NEEDS="glibc >= $(objdump -T "$BIN" \
+              | sed -n 's/.*GLIBC_\([0-9.]*\).*/\1/p' | sort -Vu | tail -1)"
+          else
+            NEEDS="（容器內無 objdump，無法判定）"
+          fi
+          {
+            echo "### ${{ matrix.arch }}"
+            echo '```'
+            echo "建置環境:   $(. /etc/os-release && echo "$PRETTY_NAME")"
+            echo "建置 glibc: $(ldd --version | head -1 | grep -o '[0-9]\+\.[0-9]\+$')"
+            echo "rustc:      $(rustc --version)"
+            echo "執行檔需要: $NEEDS"
+            echo "大小:       $(du -h "$BIN" | cut -f1)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 打包成可直接 scp 上去的一包，附上部署範例。
+      # schema.sql 已由 include_str! 編進執行檔，不需要另外附。
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/release/netflow-collector dist/
+          cp filter.toml dist/filter.toml.example
+          cp *.service.example *.timer.example dist/
+          tar -czf "netflow-collector-linux-${{ matrix.arch }}.tar.gz" -C dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: netflow-collector-linux-${{ matrix.arch }}
+          path: netflow-collector-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    # 只在有給 tag 時才跑；留空就是單純要執行檔，不動 Release。
+    if: inputs.tag != ''
+    needs: build
+    runs-on: ubuntu-24.04
+
+    # 這個 job 需要寫入權限才能建立 Release；build job 維持唯讀。
+    permissions:
+      contents: write
+
+    # 刻意不在容器裡跑：這裡不編譯任何東西，而 gh CLI 在 runner 上就有，
+    # 不需要為了它在 Debian 容器內額外安裝。
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # 部署時可以用 sha256sum -c 確認 scp 過去的東西沒被截斷或動過手腳。
+      - name: Checksums
+        working-directory: artifacts
+        run: |
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      # gh CLI 是 runner 內建的，不需要第三方 action——對 public repo 來說
+      # 也少一個供應鏈依賴。標籤不存在時 gh 會依 --target 建立。
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: artifacts
+        run: |
+          gh release create "${{ inputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --target "${{ inputs.ref || github.sha }}" \
+            --title "${{ inputs.tag }}" \
+            --generate-notes \
+            *.tar.gz SHA256SUMS
