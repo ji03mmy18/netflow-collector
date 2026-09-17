@@ -1,0 +1,22 @@
+# /etc/systemd/system/netflow-rollup.service
+# 搭配 netflow-rollup.timer，每日重建前一天的 flow_stat_1d。
+#
+# 不跑也不會壞（日表由 collector 即時累加維護），但會失去 drift 這個
+# 對帳訊號——它是「白天的累加過程掉了東西」的唯一指標。
+
+[Unit]
+Description=NetFlow daily rollup (rebuild flow_stat_1d from flow_stat_5m)
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=netflow
+ExecStart=/opt/netflow-collector/netflow-collector \
+    --config /etc/netflow-collector/filter.toml \
+    --recompute-day
+StandardError=journal
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true

@@ -1,0 +1,69 @@
+# /etc/systemd/system/netflow-collector.service
+#
+# Collector 與 PostgreSQL 同機部署。
+#
+# 注意：這裡「不需要」為了開機順序去調 StartLimitBurst，也不需要寫
+# pg_isready 的 wrapper script——collector 自己會等資料庫。
+# After= 只保證 unit 被啟動，不保證它能接受連線，所以那從來就修不了
+# 開機競賽；真正處理它的是應用程式內的退避重連。
+#
+# Restart=always 仍然保留，用來處理真正的異常退出（panic、OOM 等）。
+# 資料庫斷線不會讓行程結束，所以不會觸發重啟——統計會留在記憶體裡等補寫。
+
+[Unit]
+Description=NetFlow v5 Collector
+Documentation=file:/opt/netflow-collector/CLAUDE.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=netflow
+Group=netflow
+# --recv-buffer 會被 net.core.rmem_max 靜默截斷（setsockopt 仍回傳成功），
+# 所以這裡的值不要超過該上限，否則啟動 log 會出現 capped 警告。
+#
+# 4 MiB 對約 900 flows/sec（≈30 packets/sec、≈44 KB/sec）而言是數十秒的
+# 緩衝，而接收迴圈唯一的短暫停頓是每分鐘一次、毫秒等級的 flush。
+# 啟動時的 log 會印出實際拿到的大小。
+ExecStart=/opt/netflow-collector/netflow-collector \
+    --bind 0.0.0.0:2055 \
+    --config /etc/netflow-collector/filter.toml \
+    --db-store \
+    --recv-buffer 4194304
+
+# systemctl reload netflow-collector → 重新讀取 [[filters]]、常用 Port 與
+# [live].lines。SIGHUP 送給同 UID 的行程不需要特權，所以 netflow 帳號也能
+# 直接 kill -HUP；這行只是讓 systemd 的慣用寫法可用。
+#
+# ⚠ [[filters]] 現在也決定統計對象，所以中途重載會讓進行中的 5 分鐘桶前後
+#    半段算的是不同的位址集合。調顯示無妨，改統計對象建議重啟。
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=always
+RestartSec=5s
+
+# 日誌走 stderr，由 journald 收
+StandardOutput=null
+StandardError=journal
+
+# 設定檔含資料庫密碼
+UMask=0077
+NoNewPrivileges=true
+# 本程式不寫入任何檔案——資料進資料庫，日誌走 stderr——所以整個檔案系統
+# 唯讀即可，不需要 ReadWritePaths。
+# ProtectSystem=strict 讓整個檔案系統對本服務唯讀；程式只需要讀設定與執行
+# 自己，不寫任何檔案。
+#
+# ProtectHome 只遮蔽 /home、/root、/run/user，不涵蓋 /opt，所以把 netflow
+# 的家目錄設在 /opt/netflow-collector 不受影響；互動登入除錯也完全不受
+# 這些限制約束（沙箱只套用在本 unit 上）。
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

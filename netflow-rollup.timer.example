@@ -1,0 +1,12 @@
+# /etc/systemd/system/netflow-rollup.timer
+
+[Unit]
+Description=Run the NetFlow daily rollup
+
+[Timer]
+# 00:10 Asia/Taipei——晚於日界線，讓最後一個 5 分鐘桶確定已寫入
+OnCalendar=*-*-* 00:10:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
