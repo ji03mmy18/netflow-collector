@@ -28,7 +28,7 @@ Group=netflow
 # 啟動時的 log 會印出實際拿到的大小。
 ExecStart=/opt/netflow-collector/netflow-collector \
     --bind 0.0.0.0:2055 \
-    --config /etc/netflow-collector/filter.toml \
+    --config /etc/netflow-collector/config.toml \
     --db-store \
     --recv-buffer 4194304
 

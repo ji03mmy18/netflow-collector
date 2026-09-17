@@ -95,7 +95,7 @@ jobs:
         run: |
           mkdir -p dist
           cp target/release/netflow-collector dist/
-          cp filter.toml dist/filter.toml.example
+          cp config.toml dist/config.toml.example
           cp *.service.example *.timer.example dist/
           tar -czf "netflow-collector-linux-${{ matrix.arch }}.tar.gz" -C dist .
 

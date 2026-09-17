@@ -71,7 +71,7 @@ SRC_IP            SRC_PORT  DST_IP            DST_PORT  PACKETS   BYTES
 - 80 (HTTP), 110 (POP3), 143 (IMAP), 443 (HTTPS), 993 (IMAPS)
 - 995 (POP3S), 3306 (MySQL), 3389 (RDP), 5432 (PostgreSQL), 8080 (HTTP-ALT)
 
-**設定檔擴充**（TOML，於 `filter.toml` 中）：
+**設定檔擴充**（TOML，於 `config.toml` 中）：
 
 ```toml
 # 常用 Port 設定（可選區段）
@@ -152,7 +152,7 @@ lines = 20   # 資料區顯示的 flow record 行數，預設 10
 
 #### 設定檔格式（TOML）
 
-設定檔路徑透過 CLI 參數指定（例如 `--config filter.toml`）。
+設定檔路徑透過 CLI 參數指定（例如 `--config config.toml`）。
 
 ```toml
 # IP 過濾清單，支援 CIDR 表示法與單一 IP
@@ -241,7 +241,7 @@ cidr = "203.0.113.1"     # 無遮罩，等同 /32，直接雜湊比對
 
 #### 設定放在哪裡
 
-**所有設定都在 `filter.toml`，資料庫只放資料。**
+**所有設定都在 `config.toml`，資料庫只放資料。**
 
 | 項目 | 位置 |
 |---|---|
@@ -300,11 +300,11 @@ cidr = "203.0.113.1"     # 無遮罩，等同 /32，直接雜湊比對
 
 ```bash
 # 每日 rollup：從 5m 重建整天的 1d，冪等、可重跑。建議掛 cron。
-netflow-collector --config filter.toml --recompute-day            # 預設昨天（Taipei）
-netflow-collector --config filter.toml --recompute-day 2026-09-15
+netflow-collector --config config.toml --recompute-day            # 預設昨天（Taipei）
+netflow-collector --config config.toml --recompute-day 2026-09-15
 
 # 從 flow_raw 重建 5m（僅 28 天保留期內可行）
-netflow-collector --config filter.toml \
+netflow-collector --config config.toml \
   --recompute-5m "2026-09-15T00:00:00Z 2026-09-15T01:00:00Z"
 ```
 
@@ -411,27 +411,27 @@ OPTIONS:
 
 ```bash
 # 建立 schema（含 hypertable、壓縮政策、保留政策）
-netflow-collector --config filter.toml --migrate
+netflow-collector --config config.toml --migrate
 
-# IP 清單與內網網段都在 filter.toml，不需要碰資料庫
+# IP 清單與內網網段都在 config.toml，不需要碰資料庫
 
 # 正式運行：寫入原始資料 + 維護統計
-netflow-collector --bind 0.0.0.0:2055 --config filter.toml --db-store
+netflow-collector --bind 0.0.0.0:2055 --config config.toml --db-store
 
 # 即時監控 + 資料庫寫入同時運行
-netflow-collector --bind 0.0.0.0:2055 --config filter.toml --live --color --db-store
+netflow-collector --bind 0.0.0.0:2055 --config config.toml --live --color --db-store
 
 # 逐行追加輸出（不寫資料庫）
-netflow-collector --bind 0.0.0.0:2055 --config filter.toml --direct-print --color
+netflow-collector --bind 0.0.0.0:2055 --config config.toml --direct-print --color
 
 # 每日 rollup（cron：10 分 0 時，Asia/Taipei）
-# 10 0 * * *  netflow-collector --config /etc/netflow/filter.toml --recompute-day
-netflow-collector --config filter.toml --recompute-day
+# 10 0 * * *  netflow-collector --config /etc/netflow/config.toml --recompute-day
+netflow-collector --config config.toml --recompute-day
 
 # 修補：從原始資料重算某小時的 5m，再重算該日的 1d
-netflow-collector --config filter.toml \
+netflow-collector --config config.toml \
   --recompute-5m "2026-09-15T02:00:00Z 2026-09-15T03:00:00Z"
-netflow-collector --config filter.toml --recompute-day 2026-09-15
+netflow-collector --config config.toml --recompute-day 2026-09-15
 
 # 熱重載 [[filters]]（intra_cidr 不在此列，見下）
 kill -HUP $(pidof netflow-collector)

@@ -12,7 +12,7 @@ After=postgresql.service
 Type=oneshot
 User=netflow
 ExecStart=/opt/netflow-collector/netflow-collector \
-    --config /etc/netflow-collector/filter.toml \
+    --config /etc/netflow-collector/config.toml \
     --recompute-day
 StandardError=journal
 
